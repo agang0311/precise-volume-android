@@ -7,8 +7,12 @@ public class TileToggleActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        VolumeFineTuneService.rememberCurrentSystemVolume(this);
-        VolumeFineTuneService.start(this);
+        if (VolumeFineTuneService.isEnabled(this)) {
+            VolumeFineTuneService.stop(this);
+        } else {
+            VolumeFineTuneService.rememberCurrentSystemVolume(this);
+            VolumeFineTuneService.start(this);
+        }
         finish();
         overridePendingTransition(0, 0);
     }

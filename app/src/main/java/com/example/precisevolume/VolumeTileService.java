@@ -18,18 +18,24 @@ public class VolumeTileService extends TileService {
     @Override
     public void onClick() {
         super.onClick();
-        if (VolumeFineTuneService.isEnabled(this)) {
+        boolean enabled = VolumeFineTuneService.isEnabled(this);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startToggleActivity();
+            updateTile(!enabled);
+            return;
+        }
+
+        if (enabled) {
             VolumeFineTuneService.stop(this);
             updateTile(false);
         } else {
             VolumeFineTuneService.rememberCurrentSystemVolume(this);
             VolumeFineTuneService.start(this);
             updateTile(true);
-            startFallbackActivityIfNeeded();
         }
     }
 
-    private void startFallbackActivityIfNeeded() {
+    private void startToggleActivity() {
         Intent intent = new Intent(this, TileToggleActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
@@ -41,6 +47,8 @@ public class VolumeTileService extends TileService {
                         PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
                 );
                 startActivityAndCollapse(pendingIntent);
+            } else {
+                startActivityAndCollapse(intent);
             }
         } catch (RuntimeException ignored) {
         }

@@ -11,8 +11,8 @@
 - 下拉快捷设置 Tile：安装后可在系统快捷设置里添加“音量微调”，之后像 v2rayNG 一样从下拉菜单开关。
 - 开启时会记录当前系统媒体音量挡位；关闭时会恢复到开启前的系统媒体音量。
 - 主界面和下拉 Tile 都用 ON/OFF 显示当前状态。
-- Tile 参考 v2rayNG 的实现方式：`TileService` 直接启动/停止前台服务，并把 TileService 放到独立进程、声明 `specialUse` 前台服务类型。
-- Android 14+ 上 Tile 还会使用 `PendingIntent` 版本的 `startActivityAndCollapse` 作为备用启动路径。
+- Tile 参考 v2rayNG 的实现方式声明 `specialUse` 前台服务类型。
+- Android 14+ 上 Tile 不直接启动前台服务，改用 `PendingIntent` 版本的 `startActivityAndCollapse` 进入瞬时切换页，再由前台上下文启动或停止服务，避免 `ForegroundServiceStartNotAllowedException`。
 
 结论：真正精确音量必须发生在播放端。普通非 root app 没有官方保证能精细控制其它 app 的全局输出音量；这版会实测你的设备是否允许全局音效链。如果状态显示“不被此设备支持”，就需要 Shizuku、root、厂商音频服务，或把音频放到本 app 内播放。
 
