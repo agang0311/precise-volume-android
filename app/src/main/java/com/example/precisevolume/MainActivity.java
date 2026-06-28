@@ -1,14 +1,15 @@
 package com.example.precisevolume;
 
 import android.app.Activity;
+import android.media.AudioAttributes;
+import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioTrack;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.RadioButton;
-import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -17,99 +18,83 @@ import android.widget.Toast;
 import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final int PRECISION_STEPS = 1000;
+    private static final int GAIN_STEPS = 1000;
+    private static final int SAMPLE_RATE = 44100;
+    private static final double TONE_HZ = 440.0;
+    private static final double REFERENCE_AMPLITUDE = 0.35;
 
     private AudioManager audioManager;
-    private SeekBar preciseSlider;
-    private TextView targetText;
-    private TextView actualText;
-    private TextView limitText;
-    private RadioGroup streamGroup;
-    private int selectedStream = AudioManager.STREAM_MUSIC;
-    private boolean syncingFromSystem;
+    private SeekBar gainSlider;
+    private SeekBar systemSlider;
+    private TextView gainText;
+    private TextView relationText;
+    private TextView systemText;
+    private TextView playStateText;
+    private Button playButton;
 
-    private final StreamOption[] streams = new StreamOption[] {
-            new StreamOption("媒体", AudioManager.STREAM_MUSIC),
-            new StreamOption("铃声", AudioManager.STREAM_RING),
-            new StreamOption("通知", AudioManager.STREAM_NOTIFICATION),
-            new StreamOption("闹钟", AudioManager.STREAM_ALARM),
-            new StreamOption("通话", AudioManager.STREAM_VOICE_CALL),
-            new StreamOption("系统", AudioManager.STREAM_SYSTEM)
-    };
+    private volatile boolean playing;
+    private volatile double preciseGain = 0.05;
+    private Thread audioThread;
+    private AudioTrack audioTrack;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-        setVolumeControlStream(selectedStream);
+        setVolumeControlStream(AudioManager.STREAM_MUSIC);
         buildUi();
-        syncSliderFromSystem();
+        syncSystemSlider();
+        updateGainLabels();
+    }
+
+    @Override
+    protected void onDestroy() {
+        stopTone();
+        super.onDestroy();
     }
 
     private void buildUi() {
         ScrollView scrollView = new ScrollView(this);
         scrollView.setFillViewport(true);
-        scrollView.setBackgroundColor(color(android.R.color.background_light));
+        scrollView.setBackgroundColor(color(R.color.bg));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(24), dp(20), dp(24));
         scrollView.addView(root, matchWrap());
 
-        TextView title = text("精细音量", 28, true);
+        TextView title = text("精确音量", 28, true);
         root.addView(title, matchWrap());
 
-        TextView subtitle = text("用百分比精细选择目标值，再应用到安卓允许的最近系统挡位。", 15, false);
+        TextView subtitle = text("安卓全局音量只能按系统挡位变化；真正连续的细分音量必须在播放端做增益。", 15, false);
         subtitle.setTextColor(color(R.color.text_secondary));
         subtitle.setPadding(0, dp(8), 0, dp(18));
         root.addView(subtitle, matchWrap());
 
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setBackgroundResource(R.drawable.panel_bg);
-        root.addView(panel, matchWrap());
+        LinearLayout gainPanel = panel();
+        root.addView(gainPanel, matchWrap());
 
-        TextView streamLabel = text("音频通道", 16, true);
-        panel.addView(streamLabel, matchWrap());
+        TextView gainTitle = text("本 app 精确增益", 17, true);
+        gainPanel.addView(gainTitle, matchWrap());
 
-        streamGroup = new RadioGroup(this);
-        streamGroup.setOrientation(RadioGroup.VERTICAL);
-        streamGroup.setPadding(0, dp(8), 0, dp(14));
-        for (int i = 0; i < streams.length; i++) {
-            RadioButton button = new RadioButton(this);
-            button.setId(i + 100);
-            button.setText(streams[i].label);
-            button.setTextSize(16);
-            button.setTextColor(color(R.color.text_primary));
-            button.setPadding(0, dp(4), 0, dp(4));
-            streamGroup.addView(button, matchWrap());
-        }
-        streamGroup.check(100);
-        streamGroup.setOnCheckedChangeListener((group, checkedId) -> {
-            int index = checkedId - 100;
-            if (index >= 0 && index < streams.length) {
-                selectedStream = streams[index].stream;
-                setVolumeControlStream(selectedStream);
-                syncSliderFromSystem();
-            }
-        });
-        panel.addView(streamGroup, matchWrap());
+        gainText = text("", 26, true);
+        gainText.setPadding(0, dp(12), 0, dp(4));
+        gainPanel.addView(gainText, matchWrap());
 
-        targetText = text("", 22, true);
-        panel.addView(targetText, matchWrap());
+        relationText = text("", 15, false);
+        relationText.setTextColor(color(R.color.text_secondary));
+        relationText.setPadding(0, 0, 0, dp(12));
+        gainPanel.addView(relationText, matchWrap());
 
-        actualText = text("", 15, false);
-        actualText.setTextColor(color(R.color.text_secondary));
-        actualText.setPadding(0, dp(6), 0, dp(12));
-        panel.addView(actualText, matchWrap());
-
-        preciseSlider = new SeekBar(this);
-        preciseSlider.setMax(PRECISION_STEPS);
-        preciseSlider.setPadding(0, dp(8), 0, dp(8));
-        preciseSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        gainSlider = new SeekBar(this);
+        gainSlider.setMax(GAIN_STEPS);
+        gainSlider.setProgress(50);
+        gainSlider.setPadding(0, dp(8), 0, dp(8));
+        gainSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (!syncingFromSystem) updateLabels(progress);
+                preciseGain = progress / (double) GAIN_STEPS;
+                updateGainLabels();
             }
 
             @Override
@@ -120,102 +105,233 @@ public class MainActivity extends Activity {
             public void onStopTrackingTouch(SeekBar seekBar) {
             }
         });
-        panel.addView(preciseSlider, matchWrap());
+        gainPanel.addView(gainSlider, matchWrap());
 
-        LinearLayout fineControls = new LinearLayout(this);
-        fineControls.setOrientation(LinearLayout.HORIZONTAL);
-        fineControls.setGravity(Gravity.CENTER);
-        fineControls.setPadding(0, dp(10), 0, dp(12));
-        fineControls.addView(stepButton("-0.5%", -5), weightedButton());
-        fineControls.addView(stepButton("-0.1%", -1), weightedButton());
-        fineControls.addView(stepButton("+0.1%", 1), weightedButton());
-        fineControls.addView(stepButton("+0.5%", 5), weightedButton());
-        panel.addView(fineControls, matchWrap());
+        LinearLayout presets = row();
+        presets.addView(presetButton("2.5%", 25), weightedButton());
+        presets.addView(presetButton("5%", 50), weightedButton());
+        presets.addView(stepButton("-0.1%", -1), weightedButton());
+        presets.addView(stepButton("+0.1%", 1), weightedButton());
+        gainPanel.addView(presets, matchWrap());
 
-        Button applyButton = new Button(this);
-        applyButton.setText("应用到系统音量");
-        applyButton.setTextColor(color(android.R.color.white));
-        applyButton.setTextSize(16);
-        applyButton.setAllCaps(false);
-        applyButton.setBackgroundResource(R.drawable.button_primary);
-        applyButton.setPadding(0, dp(10), 0, dp(10));
-        applyButton.setOnClickListener(v -> applyVolume());
-        panel.addView(applyButton, matchWrap());
+        playButton = primaryButton("播放测试音");
+        playButton.setOnClickListener(v -> {
+            if (playing) stopTone();
+            else startTone();
+        });
+        gainPanel.addView(playButton, matchWrap());
 
-        Button refreshButton = new Button(this);
-        refreshButton.setText("读取当前系统音量");
-        refreshButton.setTextSize(15);
-        refreshButton.setAllCaps(false);
-        refreshButton.setBackgroundResource(R.drawable.button_secondary);
-        refreshButton.setPadding(0, dp(10), 0, dp(10));
-        LinearLayout.LayoutParams refreshParams = matchWrap();
-        refreshParams.setMargins(0, dp(10), 0, 0);
-        refreshButton.setOnClickListener(v -> syncSliderFromSystem());
-        panel.addView(refreshButton, refreshParams);
+        playStateText = text("播放 440Hz 测试音后，切换 2.5% 和 5% 可验证二者是严格 1:2。", 14, false);
+        playStateText.setTextColor(color(R.color.text_secondary));
+        playStateText.setPadding(0, dp(12), 0, 0);
+        gainPanel.addView(playStateText, matchWrap());
 
-        limitText = text("说明：安卓公开接口只能设置整数挡位。本 app 可以精确输入目标百分比，但全局系统音量会落到最接近的挡位。", 14, false);
-        limitText.setTextColor(color(R.color.text_secondary));
-        limitText.setPadding(0, dp(18), 0, 0);
-        root.addView(limitText, matchWrap());
+        LinearLayout systemPanel = panel();
+        LinearLayout.LayoutParams systemParams = matchWrap();
+        systemParams.setMargins(0, dp(16), 0, 0);
+        root.addView(systemPanel, systemParams);
+
+        TextView systemTitle = text("系统媒体音量粗调", 17, true);
+        systemPanel.addView(systemTitle, matchWrap());
+
+        systemText = text("", 15, false);
+        systemText.setTextColor(color(R.color.text_secondary));
+        systemText.setPadding(0, dp(10), 0, dp(12));
+        systemPanel.addView(systemText, matchWrap());
+
+        systemSlider = new SeekBar(this);
+        systemSlider.setPadding(0, dp(8), 0, dp(8));
+        systemSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (fromUser) applySystemVolume(progress);
+                updateSystemLabel(progress);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+        systemPanel.addView(systemSlider, matchWrap());
+
+        Button refreshButton = secondaryButton("读取当前系统媒体音量");
+        refreshButton.setOnClickListener(v -> syncSystemSlider());
+        systemPanel.addView(refreshButton, matchWrap());
+
+        TextView note = text("结论：如果要控制其它 app 的声音，普通安卓 app 做不到 2.5% 是 5% 的一半；系统只接受整数挡位。要对任意 app 生效，需要系统级权限、root、厂商音频服务，或让音频在本 app 内播放。", 14, false);
+        note.setTextColor(color(R.color.text_secondary));
+        note.setPadding(0, dp(18), 0, 0);
+        root.addView(note, matchWrap());
 
         setContentView(scrollView);
     }
 
+    private void startTone() {
+        if (playing) return;
+        playing = true;
+        playButton.setText("停止测试音");
+        playStateText.setText("正在播放。当前精确增益会实时作用到本 app 输出的音频样本。");
+        audioThread = new Thread(this::runTone, "precise-volume-tone");
+        audioThread.start();
+    }
+
+    private void stopTone() {
+        playing = false;
+        if (audioThread != null) {
+            try {
+                audioThread.join(500);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+            audioThread = null;
+        }
+        releaseAudioTrack();
+        if (playButton != null) playButton.setText("播放测试音");
+        if (playStateText != null) {
+            playStateText.setText("播放 440Hz 测试音后，切换 2.5% 和 5% 可验证二者是严格 1:2。");
+        }
+    }
+
+    private void runTone() {
+        int minBuffer = AudioTrack.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+        );
+        int bufferFrames = Math.max(1024, minBuffer / 2);
+        short[] buffer = new short[bufferFrames];
+        double phase = 0.0;
+        double phaseStep = 2.0 * Math.PI * TONE_HZ / SAMPLE_RATE;
+
+        AudioTrack track = new AudioTrack.Builder()
+                .setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build())
+                .setAudioFormat(new AudioFormat.Builder()
+                        .setSampleRate(SAMPLE_RATE)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build())
+                .setBufferSizeInBytes(bufferFrames * 2)
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build();
+
+        audioTrack = track;
+        track.play();
+        while (playing) {
+            double gain = preciseGain;
+            for (int i = 0; i < buffer.length; i++) {
+                double sample = Math.sin(phase) * REFERENCE_AMPLITUDE * gain;
+                buffer[i] = (short) Math.round(sample * Short.MAX_VALUE);
+                phase += phaseStep;
+                if (phase >= 2.0 * Math.PI) phase -= 2.0 * Math.PI;
+            }
+            track.write(buffer, 0, buffer.length);
+        }
+        releaseAudioTrack();
+    }
+
+    private void releaseAudioTrack() {
+        AudioTrack track = audioTrack;
+        audioTrack = null;
+        if (track == null) return;
+        try {
+            track.pause();
+            track.flush();
+        } catch (IllegalStateException ignored) {
+        }
+        track.release();
+    }
+
+    private void updateGainLabels() {
+        double percent = preciseGain * 100.0;
+        gainText.setText(String.format(Locale.getDefault(), "精确增益：%.1f%%", percent));
+        relationText.setText(String.format(
+                Locale.getDefault(),
+                "相对 5%%：%.2f 倍。2.5%% = 0.50 倍，数字样本幅度严格减半。",
+                preciseGain / 0.05
+        ));
+    }
+
+    private void syncSystemSlider() {
+        int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        int current = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+        systemSlider.setMax(max);
+        systemSlider.setProgress(current);
+        updateSystemLabel(current);
+    }
+
+    private void applySystemVolume(int index) {
+        try {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, index, AudioManager.FLAG_SHOW_UI);
+        } catch (SecurityException exception) {
+            Toast.makeText(this, "系统当前不允许修改媒体音量", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void updateSystemLabel(int index) {
+        int max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+        systemText.setText(String.format(
+                Locale.getDefault(),
+                "当前系统媒体音量：第 %d / %d 挡。它仍然只能按整数挡位生效。",
+                index,
+                max
+        ));
+    }
+
+    private Button presetButton(String label, int progress) {
+        Button button = secondaryButton(label);
+        button.setOnClickListener(v -> gainSlider.setProgress(progress));
+        return button;
+    }
+
     private Button stepButton(String label, int delta) {
-        Button button = new Button(this);
-        button.setText(label);
-        button.setTextSize(13);
-        button.setAllCaps(false);
-        button.setBackgroundResource(R.drawable.button_secondary);
+        Button button = secondaryButton(label);
         button.setOnClickListener(v -> {
-            int next = Math.max(0, Math.min(PRECISION_STEPS, preciseSlider.getProgress() + delta));
-            preciseSlider.setProgress(next);
-            updateLabels(next);
+            int next = Math.max(0, Math.min(GAIN_STEPS, gainSlider.getProgress() + delta));
+            gainSlider.setProgress(next);
         });
         return button;
     }
 
-    private void syncSliderFromSystem() {
-        syncingFromSystem = true;
-        int max = Math.max(1, audioManager.getStreamMaxVolume(selectedStream));
-        int current = audioManager.getStreamVolume(selectedStream);
-        int progress = Math.round((current * PRECISION_STEPS) / (float) max);
-        preciseSlider.setProgress(progress);
-        syncingFromSystem = false;
-        updateLabels(progress);
+    private LinearLayout panel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setBackgroundResource(R.drawable.panel_bg);
+        return panel;
     }
 
-    private void applyVolume() {
-        int max = Math.max(1, audioManager.getStreamMaxVolume(selectedStream));
-        int targetIndex = progressToSystemIndex(preciseSlider.getProgress(), max);
-        try {
-            audioManager.setStreamVolume(selectedStream, targetIndex, AudioManager.FLAG_SHOW_UI);
-        } catch (SecurityException exception) {
-            Toast.makeText(this, "系统当前不允许修改这个通道，可能受勿扰模式限制", Toast.LENGTH_LONG).show();
-            return;
-        }
-        updateLabels(preciseSlider.getProgress());
-        Toast.makeText(this, "已应用到第 " + targetIndex + " / " + max + " 挡", Toast.LENGTH_SHORT).show();
+    private LinearLayout row() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(0, dp(10), 0, dp(12));
+        return row;
     }
 
-    private void updateLabels(int progress) {
-        int max = Math.max(1, audioManager.getStreamMaxVolume(selectedStream));
-        int targetIndex = progressToSystemIndex(progress, max);
-        float targetPercent = progress / 10f;
-        float actualPercent = targetIndex * 100f / max;
-
-        targetText.setText(String.format(Locale.getDefault(), "目标：%.1f%%", targetPercent));
-        actualText.setText(String.format(
-                Locale.getDefault(),
-                "将应用为系统第 %d / %d 挡，实际约 %.1f%%",
-                targetIndex,
-                max,
-                actualPercent
-        ));
+    private Button primaryButton(String label) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextColor(color(android.R.color.white));
+        button.setTextSize(16);
+        button.setAllCaps(false);
+        button.setBackgroundResource(R.drawable.button_primary);
+        button.setPadding(0, dp(10), 0, dp(10));
+        return button;
     }
 
-    private int progressToSystemIndex(int progress, int max) {
-        return Math.max(0, Math.min(max, Math.round(progress * max / (float) PRECISION_STEPS)));
+    private Button secondaryButton(String label) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(14);
+        button.setAllCaps(false);
+        button.setBackgroundResource(R.drawable.button_secondary);
+        return button;
     }
 
     private TextView text(String value, int sp, boolean bold) {
@@ -246,15 +362,5 @@ public class MainActivity extends Activity {
 
     private int color(int id) {
         return getResources().getColor(id, getTheme());
-    }
-
-    private static class StreamOption {
-        final String label;
-        final int stream;
-
-        StreamOption(String label, int stream) {
-            this.label = label;
-            this.stream = stream;
-        }
     }
 }
