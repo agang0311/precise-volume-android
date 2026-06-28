@@ -27,6 +27,7 @@ public class VolumeFineTuneService extends Service {
     public static final String KEY_LAST_STATUS = "last_status";
     public static final String KEY_RESTORE_VOLUME = "restore_volume";
     public static final String KEY_HAS_RESTORE_VOLUME = "has_restore_volume";
+    public static final String KEY_LAST_ERROR = "last_error";
 
     private static final String CHANNEL_ID = "volume_fine_tune";
     private static final int NOTIFICATION_ID = 1001;
@@ -36,6 +37,11 @@ public class VolumeFineTuneService extends Service {
     private Equalizer equalizer;
 
     public static void start(Context context) {
+        prefs(context).edit()
+                .putBoolean(KEY_ENABLED, true)
+                .putString(KEY_LAST_STATUS, "正在开启全局微调")
+                .putString(KEY_LAST_ERROR, "")
+                .apply();
         Intent intent = new Intent(context, VolumeFineTuneService.class).setAction(ACTION_START);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -48,13 +54,27 @@ public class VolumeFineTuneService extends Service {
             prefs(context).edit()
                     .putBoolean(KEY_ENABLED, false)
                     .putString(KEY_LAST_STATUS, message)
+                    .putString(KEY_LAST_ERROR, exception.toString())
                     .apply();
             Toast.makeText(context, message, Toast.LENGTH_LONG).show();
         }
     }
 
     public static void stop(Context context) {
-        context.startService(new Intent(context, VolumeFineTuneService.class).setAction(ACTION_STOP));
+        prefs(context).edit()
+                .putBoolean(KEY_ENABLED, false)
+                .putString(KEY_LAST_STATUS, "正在关闭全局微调")
+                .apply();
+        try {
+            context.startService(new Intent(context, VolumeFineTuneService.class).setAction(ACTION_STOP));
+        } catch (RuntimeException exception) {
+            String message = "关闭全局微调失败：" + exception.getClass().getSimpleName();
+            prefs(context).edit()
+                    .putString(KEY_LAST_STATUS, message)
+                    .putString(KEY_LAST_ERROR, exception.toString())
+                    .apply();
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show();
+        }
     }
 
     public static void rememberCurrentSystemVolume(Context context) {
@@ -150,7 +170,11 @@ public class VolumeFineTuneService extends Service {
                 gainDb,
                 effect
         );
-        prefs(this).edit().putString(KEY_LAST_STATUS, status).apply();
+        prefs(this).edit()
+                .putBoolean(KEY_ENABLED, true)
+                .putString(KEY_LAST_STATUS, status)
+                .putString(KEY_LAST_ERROR, "")
+                .apply();
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         manager.notify(NOTIFICATION_ID, buildNotification(status));
     }
