@@ -24,6 +24,8 @@ public class VolumeFineTuneService extends Service {
     public static final String KEY_ENABLED = "enabled";
     public static final String KEY_TARGET_PERCENT = "target_percent";
     public static final String KEY_LAST_STATUS = "last_status";
+    public static final String KEY_RESTORE_VOLUME = "restore_volume";
+    public static final String KEY_HAS_RESTORE_VOLUME = "has_restore_volume";
 
     private static final String CHANNEL_ID = "volume_fine_tune";
     private static final int NOTIFICATION_ID = 1001;
@@ -43,6 +45,15 @@ public class VolumeFineTuneService extends Service {
 
     public static void stop(Context context) {
         context.startService(new Intent(context, VolumeFineTuneService.class).setAction(ACTION_STOP));
+    }
+
+    public static void rememberCurrentSystemVolume(Context context) {
+        if (isEnabled(context)) return;
+        AudioManager manager = (AudioManager) context.getSystemService(AUDIO_SERVICE);
+        prefs(context).edit()
+                .putInt(KEY_RESTORE_VOLUME, manager.getStreamVolume(AudioManager.STREAM_MUSIC))
+                .putBoolean(KEY_HAS_RESTORE_VOLUME, true)
+                .apply();
     }
 
     public static boolean isEnabled(Context context) {
@@ -79,6 +90,7 @@ public class VolumeFineTuneService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         String action = intent == null ? ACTION_START : intent.getAction();
         if (ACTION_STOP.equals(action)) {
+            restoreSystemVolume();
             setEnabled(false);
             stopForeground(true);
             stopSelf();
@@ -131,6 +143,25 @@ public class VolumeFineTuneService extends Service {
         prefs(this).edit().putString(KEY_LAST_STATUS, status).apply();
         NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
         manager.notify(NOTIFICATION_ID, buildNotification(status));
+    }
+
+    private void restoreSystemVolume() {
+        SharedPreferences preferences = prefs(this);
+        if (!preferences.getBoolean(KEY_HAS_RESTORE_VOLUME, false)) return;
+        int max = Math.max(1, audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+        int restoreVolume = Math.max(0, Math.min(max, preferences.getInt(KEY_RESTORE_VOLUME, 0)));
+        try {
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, restoreVolume, 0);
+            preferences.edit()
+                    .putString(KEY_LAST_STATUS, "已关闭，系统媒体音量已恢复到第 " + restoreVolume + "/" + max + " 挡")
+                    .putBoolean(KEY_HAS_RESTORE_VOLUME, false)
+                    .apply();
+        } catch (SecurityException exception) {
+            preferences.edit()
+                    .putString(KEY_LAST_STATUS, "已关闭，但系统不允许恢复媒体音量")
+                    .putBoolean(KEY_HAS_RESTORE_VOLUME, false)
+                    .apply();
+        }
     }
 
     private String applyGlobalGain(float gainDb) {

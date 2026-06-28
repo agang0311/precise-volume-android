@@ -1,5 +1,6 @@
 package com.example.precisevolume;
 
+import android.content.Intent;
 import android.content.ComponentName;
 import android.content.Context;
 import android.os.Build;
@@ -19,7 +20,9 @@ public class VolumeTileService extends TileService {
         if (VolumeFineTuneService.isEnabled(this)) {
             VolumeFineTuneService.stop(this);
         } else {
-            VolumeFineTuneService.start(this);
+            Intent intent = new Intent(this, TileToggleActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivityAndCollapse(intent);
         }
         updateTile();
     }

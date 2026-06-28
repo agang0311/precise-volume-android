@@ -201,6 +201,7 @@ public class MainActivity extends Activity {
             VolumeFineTuneService.stop(this);
         } else {
             VolumeFineTuneService.setTargetPercent(this, (float) preciseGain * 100.0f);
+            VolumeFineTuneService.rememberCurrentSystemVolume(this);
             VolumeFineTuneService.start(this);
         }
         updateServiceLabels();
