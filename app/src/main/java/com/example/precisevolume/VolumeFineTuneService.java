@@ -138,10 +138,10 @@ public class VolumeFineTuneService extends Service {
             try {
                 releaseEqualizer();
                 if (dynamicsProcessing == null) {
-                    dynamicsProcessing = new DynamicsProcessing(0, 0);
+                    dynamicsProcessing = new DynamicsProcessing(0, 0, null);
                     dynamicsProcessing.setEnabled(true);
                 }
-                dynamicsProcessing.setInputGainAllChannels(gainDb);
+                dynamicsProcessing.setInputGainAllChannelsTo(gainDb);
                 return "DynamicsProcessing 已启用";
             } catch (RuntimeException exception) {
                 releaseDynamicsProcessing();
