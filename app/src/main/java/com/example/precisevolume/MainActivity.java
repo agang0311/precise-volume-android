@@ -1,10 +1,13 @@
 package com.example.precisevolume;
 
 import android.app.Activity;
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -30,7 +33,9 @@ public class MainActivity extends Activity {
     private TextView relationText;
     private TextView systemText;
     private TextView playStateText;
+    private TextView serviceStatusText;
     private Button playButton;
+    private Button serviceButton;
 
     private volatile boolean playing;
     private volatile double preciseGain = 0.05;
@@ -45,6 +50,12 @@ public class MainActivity extends Activity {
         buildUi();
         syncSystemSlider();
         updateGainLabels();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateServiceLabels();
     }
 
     @Override
@@ -94,6 +105,7 @@ public class MainActivity extends Activity {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 preciseGain = progress / (double) GAIN_STEPS;
+                VolumeFineTuneService.setTargetPercent(MainActivity.this, (float) preciseGain * 100.0f);
                 updateGainLabels();
             }
 
@@ -113,6 +125,15 @@ public class MainActivity extends Activity {
         presets.addView(stepButton("-0.1%", -1), weightedButton());
         presets.addView(stepButton("+0.1%", 1), weightedButton());
         gainPanel.addView(presets, matchWrap());
+
+        serviceButton = primaryButton("开启全局微调");
+        serviceButton.setOnClickListener(v -> toggleFineTuneService());
+        gainPanel.addView(serviceButton, matchWrap());
+
+        serviceStatusText = text("", 14, false);
+        serviceStatusText.setTextColor(color(R.color.text_secondary));
+        serviceStatusText.setPadding(0, dp(12), 0, dp(12));
+        gainPanel.addView(serviceStatusText, matchWrap());
 
         playButton = primaryButton("播放测试音");
         playButton.setOnClickListener(v -> {
@@ -162,12 +183,27 @@ public class MainActivity extends Activity {
         refreshButton.setOnClickListener(v -> syncSystemSlider());
         systemPanel.addView(refreshButton, matchWrap());
 
-        TextView note = text("结论：如果要控制其它 app 的声音，普通安卓 app 做不到 2.5% 是 5% 的一半；系统只接受整数挡位。要对任意 app 生效，需要系统级权限、root、厂商音频服务，或让音频在本 app 内播放。", 14, false);
+        TextView note = text("使用方式：先在系统下拉快捷设置里添加“音量微调”Tile，之后可像 v2rayNG 一样从下拉菜单开关。开启后会保留一个低干扰常驻通知，这是安卓前台服务的系统要求。若状态显示“不被此设备支持”，说明这台设备不允许普通 app 挂全局音效链。", 14, false);
         note.setTextColor(color(R.color.text_secondary));
         note.setPadding(0, dp(18), 0, 0);
         root.addView(note, matchWrap());
 
         setContentView(scrollView);
+    }
+
+    private void toggleFineTuneService() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 10);
+        }
+
+        if (VolumeFineTuneService.isEnabled(this)) {
+            VolumeFineTuneService.stop(this);
+        } else {
+            VolumeFineTuneService.setTargetPercent(this, (float) preciseGain * 100.0f);
+            VolumeFineTuneService.start(this);
+        }
+        updateServiceLabels();
     }
 
     private void startTone() {
@@ -253,9 +289,19 @@ public class MainActivity extends Activity {
         gainText.setText(String.format(Locale.getDefault(), "精确增益：%.1f%%", percent));
         relationText.setText(String.format(
                 Locale.getDefault(),
-                "相对 5%%：%.2f 倍。2.5%% = 0.50 倍，数字样本幅度严格减半。",
+                "相对 5%%：%.2f 倍。开启全局微调后，会把系统音量设到不低于目标的最近挡位，再额外衰减。",
                 preciseGain / 0.05
         ));
+        updateServiceLabels();
+    }
+
+    private void updateServiceLabels() {
+        if (serviceButton == null || serviceStatusText == null) return;
+        boolean enabled = VolumeFineTuneService.isEnabled(this);
+        serviceButton.setText(enabled ? "停止全局微调" : "开启全局微调");
+        serviceStatusText.setText(enabled
+                ? VolumeFineTuneService.getLastStatus(this)
+                : "全局微调未开启。当前滑杆只影响本 app 测试音。");
     }
 
     private void syncSystemSlider() {
