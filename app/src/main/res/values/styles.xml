@@ -6,12 +6,4 @@
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:windowActionModeOverlay">true</item>
     </style>
-
-    <style name="InvisibleActivityTheme" parent="android:style/Theme.Material.NoActionBar">
-        <item name="android:windowIsTranslucent">true</item>
-        <item name="android:windowNoTitle">true</item>
-        <item name="android:windowDisablePreview">true</item>
-        <item name="android:windowIsFloating">false</item>
-        <item name="android:colorAccent">@color/accent</item>
-    </style>
 </resources>

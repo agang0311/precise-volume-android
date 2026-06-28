@@ -13,6 +13,7 @@ import android.media.audiofx.DynamicsProcessing;
 import android.media.audiofx.Equalizer;
 import android.os.Build;
 import android.os.IBinder;
+import android.widget.Toast;
 
 import java.util.Locale;
 
@@ -36,10 +37,19 @@ public class VolumeFineTuneService extends Service {
 
     public static void start(Context context) {
         Intent intent = new Intent(context, VolumeFineTuneService.class).setAction(ACTION_START);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent);
-        } else {
-            context.startService(intent);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent);
+            } else {
+                context.startService(intent);
+            }
+        } catch (RuntimeException exception) {
+            String message = "启动全局微调失败：" + exception.getClass().getSimpleName();
+            prefs(context).edit()
+                    .putBoolean(KEY_ENABLED, false)
+                    .putString(KEY_LAST_STATUS, message)
+                    .apply();
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show();
         }
     }
 

@@ -1,6 +1,5 @@
 package com.example.precisevolume;
 
-import android.content.Intent;
 import android.content.ComponentName;
 import android.content.Context;
 import android.os.Build;
@@ -19,24 +18,27 @@ public class VolumeTileService extends TileService {
         super.onClick();
         if (VolumeFineTuneService.isEnabled(this)) {
             VolumeFineTuneService.stop(this);
+            updateTile(false);
         } else {
-            Intent intent = new Intent(this, TileToggleActivity.class)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            startActivityAndCollapse(intent);
+            VolumeFineTuneService.rememberCurrentSystemVolume(this);
+            VolumeFineTuneService.start(this);
+            updateTile(true);
         }
-        updateTile();
     }
 
     private void updateTile() {
+        updateTile(VolumeFineTuneService.isEnabled(this));
+    }
+
+    private void updateTile(boolean enabled) {
         Tile tile = getQsTile();
         if (tile == null) return;
-        boolean enabled = VolumeFineTuneService.isEnabled(this);
         tile.setState(enabled ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         tile.setLabel("音量微调");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             tile.setSubtitle(enabled
-                    ? String.format("%.1f%%", VolumeFineTuneService.getTargetPercent(this))
-                    : "关闭");
+                    ? String.format("ON %.1f%%", VolumeFineTuneService.getTargetPercent(this))
+                    : "OFF");
         }
         tile.updateTile();
     }

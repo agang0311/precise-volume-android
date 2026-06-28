@@ -15,6 +15,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
+import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -35,7 +36,8 @@ public class MainActivity extends Activity {
     private TextView playStateText;
     private TextView serviceStatusText;
     private Button playButton;
-    private Button serviceButton;
+    private Switch serviceSwitch;
+    private boolean updatingServiceSwitch;
 
     private volatile boolean playing;
     private volatile double preciseGain = 0.05;
@@ -126,9 +128,17 @@ public class MainActivity extends Activity {
         presets.addView(stepButton("+0.1%", 1), weightedButton());
         gainPanel.addView(presets, matchWrap());
 
-        serviceButton = primaryButton("开启全局微调");
-        serviceButton.setOnClickListener(v -> toggleFineTuneService());
-        gainPanel.addView(serviceButton, matchWrap());
+        LinearLayout switchRow = row();
+        TextView switchLabel = text("全局微调", 16, true);
+        switchRow.addView(switchLabel, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        serviceSwitch = new Switch(this);
+        serviceSwitch.setText("OFF");
+        serviceSwitch.setTextSize(16);
+        serviceSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (!updatingServiceSwitch) setFineTuneEnabled(isChecked);
+        });
+        switchRow.addView(serviceSwitch, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        gainPanel.addView(switchRow, matchWrap());
 
         serviceStatusText = text("", 14, false);
         serviceStatusText.setTextColor(color(R.color.text_secondary));
@@ -191,18 +201,18 @@ public class MainActivity extends Activity {
         setContentView(scrollView);
     }
 
-    private void toggleFineTuneService() {
+    private void setFineTuneEnabled(boolean enabled) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 10);
         }
 
-        if (VolumeFineTuneService.isEnabled(this)) {
-            VolumeFineTuneService.stop(this);
-        } else {
+        if (enabled) {
             VolumeFineTuneService.setTargetPercent(this, (float) preciseGain * 100.0f);
             VolumeFineTuneService.rememberCurrentSystemVolume(this);
             VolumeFineTuneService.start(this);
+        } else {
+            VolumeFineTuneService.stop(this);
         }
         updateServiceLabels();
     }
@@ -297,9 +307,12 @@ public class MainActivity extends Activity {
     }
 
     private void updateServiceLabels() {
-        if (serviceButton == null || serviceStatusText == null) return;
+        if (serviceSwitch == null || serviceStatusText == null) return;
         boolean enabled = VolumeFineTuneService.isEnabled(this);
-        serviceButton.setText(enabled ? "停止全局微调" : "开启全局微调");
+        updatingServiceSwitch = true;
+        serviceSwitch.setChecked(enabled);
+        serviceSwitch.setText(enabled ? "ON" : "OFF");
+        updatingServiceSwitch = false;
         serviceStatusText.setText(enabled
                 ? VolumeFineTuneService.getLastStatus(this)
                 : "全局微调未开启。当前滑杆只影响本 app 测试音。");

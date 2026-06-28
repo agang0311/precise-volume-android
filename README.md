@@ -10,7 +10,8 @@
 - 全局微调实验：常驻前台服务会尝试把全局音效挂到 audio session 0，用 `DynamicsProcessing` 或 `Equalizer` 做额外衰减。
 - 下拉快捷设置 Tile：安装后可在系统快捷设置里添加“音量微调”，之后像 v2rayNG 一样从下拉菜单开关。
 - 开启时会记录当前系统媒体音量挡位；关闭时会恢复到开启前的系统媒体音量。
-- Tile 开启时会用一个瞬时透明 Activity 拉起前台服务，避免 app 没在前台时 Tile 点击无效。
+- 主界面和下拉 Tile 都用 ON/OFF 显示当前状态。
+- Tile 参考 v2rayNG 的实现方式：`TileService` 直接启动/停止前台服务，并把 TileService 放到独立进程、声明 `specialUse` 前台服务类型。
 
 结论：真正精确音量必须发生在播放端。普通非 root app 没有官方保证能精细控制其它 app 的全局输出音量；这版会实测你的设备是否允许全局音效链。如果状态显示“不被此设备支持”，就需要 Shizuku、root、厂商音频服务，或把音频放到本 app 内播放。
 
