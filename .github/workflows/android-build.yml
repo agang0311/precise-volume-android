@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    name: Build debug APK
+    name: Build release APK
     runs-on: ubuntu-latest
 
     steps:
@@ -34,10 +34,10 @@ jobs:
           gradle-version: "8.7"
 
       - name: Build APK
-        run: gradle assembleDebug
+        run: gradle assembleRelease
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: precise-volume-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: precise-volume-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
